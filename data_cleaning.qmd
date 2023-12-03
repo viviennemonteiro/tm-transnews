@@ -1,0 +1,139 @@
+---
+title: "Cleaning Data"
+format: html
+editor: source
+---
+
+## Set up
+
+```{r}
+#| label: load packages
+
+library(tidyverse)
+library(tm)
+library(tidytext)
+library(janitor)
+
+```
+
+```{r}
+#| label: load data
+
+load("data/trans_news_data.Rda")
+```
+
+## Pre-processing
+
+```{r}
+#| label: define processing functions
+
+pub_normalize <- function(x) {
+  str_to_lower(x) |>
+  str_replace_all("[:blank:]", "") |>
+  str_replace_all("[:punct:]", "")
+}
+
+doctype_normalize <- function(x) {
+  str_to_lower(x) |>
+  str_replace(".*review.*", "review") |>
+  str_replace_all("[:blank:]", "") |>
+  str_replace_all(".*obituary.*", "obituary") |>
+  str_replace_all("news.+", "news") |>
+  str_replace_all("opinion[^s]|opinion$", "opinions") |>
+  str_replace_all(".*correction.*", "correctionretraction")
+  #str_replace_all("[:punct:]", "") |>
+}
+
+fulltext_preprocess <- function (x) {
+  str_to_lower(x) |>
+  str_replace_all('http\\S+\\s*', "") |>
+  str_replace_all("\\(?\\d\\d\\d\\)?-\\d\\d\\d-\\d\\d\\d\\d", "") |>
+  str_replace_all("[:punct:]", "") |>
+  str_replace_all(' +', ' ') |>
+  str_trim(side="both")
+}
+
+title_process <- function (x) {
+  str_to_lower(x) |>
+  str_replace_all("\\[.*\\]", "") |>
+  str_replace_all(' +', ' ') |>
+  str_trim(side="both") |>
+  str_replace_all(":$", "")
+} # missing extra space
+
+```
+
+```{r}
+clean_df <- doc_df |>
+  rename(
+    doc_id = proquest_document_id,
+    doc_url = document_url
+  ) |>
+  mutate(
+    # text preprocessing
+    title = title_process(title),
+    full_text = fulltext_preprocess(full_text),
+    source_type = pub_normalize(source_type), #normalize source type
+    document_type = doctype_normalize(document_type),
+    #normalize factors
+    publisher = recode( #recode publisher factor
+      pub_normalize(publisher), #apply normalize function to remove spaces and punctuation
+      "newyorktimescompany" = "NYT",
+      "wpcompanyllcdbathewashingtonpost" = "WP",
+      "dowjonescompanyinc" = "WSJ",
+      "losangelestimescommunicationsllc" = "LA",
+      "tribunepublishingcompanyllc" = "CH"
+    ),
+    #date
+    publication_date = as.Date(str_replace_all(publication_date, " ", ""), format="%b%d,%Y"),#format date
+    #solve NAs in date; get date from title get date from copyright
+    posted_temp = as.Date(str_remove_all(str_replace_all(str_extract(title, "(posted .*)"), "posted |\\d\\d:\\d\\d:\\d\\d\\).*", ""), " ")),
+    cr_temp = as.Date(str_extract(copyright, "[:alpha:]{3} \\d{1,2}, \\d{4}$"), format="%b %d, %Y"),
+    posted_temp = coalesce(posted_temp, cr_temp),
+    publication_date = coalesce(publication_date, posted_temp)
+  ) |>
+  filter(
+    !publisher %in% c("activision", "brasseysincofdullesva", "newstex", NA), #filter out incorrect publishers
+    !document_type %in% c("letter"), #filter out letters
+    !rowSums(is.na(doc_df)) == ncol(doc_df), #filter out if row is all NA
+    !grepl("^not available", full_text) #filter out not available full text
+  ) |>
+  mutate_at(
+    c("publisher", "column", "subject", "source_type", "document_type"), as.factor #make factor
+  ) |>
+  select(
+    !contains("_temp"),
+    !copyright
+  ) |>
+  distinct()
+```
+
+```{r}
+summary(clean_df)
+```
+## Create opener_sen for duplication
+```{r}
+clean_df |>
+  
+```
+
+
+## Merge Near Duplicates
+
+```{r}
+#check
+
+dupes <- clean_df |>
+  get_dupes(title, open_sentence)
+
+```
+
+By title: 8131
+- Gets rid of a bunch of briefings
+- also gets rid of schedules which solves a lot
+
+title ft: 1804
+- all the basics leaves some of the slightly differet
+
+title open_sen: 
+- 
