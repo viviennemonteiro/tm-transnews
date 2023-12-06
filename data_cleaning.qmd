@@ -4,7 +4,7 @@ format: html
 editor: source
 ---
 
-## Set up
+# Set up
 
 ```{r}
 #| label: load packages
@@ -13,6 +13,8 @@ library(tidyverse)
 library(tm)
 library(tidytext)
 library(janitor)
+library(SnowballC)
+
 
 ```
 
@@ -22,7 +24,7 @@ library(janitor)
 load("data/trans_news_data.Rda")
 ```
 
-## Pre-processing
+# Pre-processing
 
 ```{r}
 #| label: define processing functions
@@ -48,7 +50,8 @@ fulltext_preprocess <- function (x) {
   str_to_lower(x) |>
   str_replace_all('http\\S+\\s*', "") |>
   str_replace_all("\\(?\\d\\d\\d\\)?-\\d\\d\\d-\\d\\d\\d\\d", "") |>
-  str_replace_all("[:punct:]", "") |>
+  removePunctuation() |>
+  removeNumbers() |>
   str_replace_all(' +', ' ') |>
   str_trim(side="both")
 }
@@ -70,6 +73,7 @@ clean_df <- doc_df |>
     doc_url = document_url
   ) |>
   mutate(
+    first_sentence = fulltext_preprocess(str_extract(full_text, ".{100}")),
     # text preprocessing
     title = title_process(title),
     full_text = fulltext_preprocess(full_text),
@@ -90,50 +94,114 @@ clean_df <- doc_df |>
     posted_temp = as.Date(str_remove_all(str_replace_all(str_extract(title, "(posted .*)"), "posted |\\d\\d:\\d\\d:\\d\\d\\).*", ""), " ")),
     cr_temp = as.Date(str_extract(copyright, "[:alpha:]{3} \\d{1,2}, \\d{4}$"), format="%b %d, %Y"),
     posted_temp = coalesce(posted_temp, cr_temp),
-    publication_date = coalesce(publication_date, posted_temp)
+    publication_date = coalesce(publication_date, posted_temp), 
   ) |>
   filter(
     !publisher %in% c("activision", "brasseysincofdullesva", "newstex", NA), #filter out incorrect publishers
-    !document_type %in% c("letter"), #filter out letters
+    !document_type %in% c("letter", "correctionretraction", "lettertotheeditor"), #filter out letters
     !rowSums(is.na(doc_df)) == ncol(doc_df), #filter out if row is all NA
-    !grepl("^not available", full_text) #filter out not available full text
+    !grepl("^not available|enlarge this image", full_text), #filter out not available full text
+    !grepl("^$", title),
+    !grepl("calendar|^correction[s$]", title)
   ) |>
   mutate_at(
     c("publisher", "column", "subject", "source_type", "document_type"), as.factor #make factor
   ) |>
   select(
-    !contains("_temp"),
-    !copyright
+    -contains("_temp"),
+    -copyright
   ) |>
-  distinct()
+  distinct(across(-c(doc_id, doc_url)))
 ```
 
 ```{r}
 summary(clean_df)
 ```
-## Create opener_sen for duplication
+
+# Merge Near Duplicates
+
 ```{r}
-clean_df |>
+#dedupe by first sentence
+deduped_df <- clean_df |>
+  mutate(
+    num_na = rowSums(is.na(clean_df))
+  ) |>
+  arrange(num_na) |>
+  distinct(first_sentence, source_type, .keep_all = TRUE) |>
+  select(
+    -first_sentence
+  )
   
 ```
 
-
-## Merge Near Duplicates
-
 ```{r}
-#check
+#This removes all of the dupes with title repeated more than 4. This captures all of the 
+repeated_dupes <- deduped_df |>
+  get_dupes(title) |>
+  filter(
+    dupe_count >= 4
+  )
 
-dupes <- clean_df |>
-  get_dupes(title, open_sentence)
+deduped_df <- deduped_df |>
+  anti_join(dupes, join_by(title))
+```
+
+## rolling up remaining
+```{r}
+# roll up differing source type
+metadata_rolled <- clean_df |>
+  group_by(title, source_type) |>
+  summarise(
+    across(!full_text,                                  
+           ~paste0(unique(na.omit(.x)), collapse = "; "))
+  )
 
 ```
 
-By title: 8131
-- Gets rid of a bunch of briefings
-- also gets rid of schedules which solves a lot
+By title: 7397 - Gets rid of a bunch of briefings - also gets rid of schedules which solves a lot
 
-title ft: 1804
-- all the basics leaves some of the slightly differet
+title ft: 1037 - all the basics leaves some of the slightly differet
 
-title open_sen: 
-- 
+title source_type: 4215
+
+```{r}
+metadata_rolled |>
+  get_dupes(title)
+```
+
+# Initial Analysis
+
+```{r}
+data("stop_words")
+
+stop_words2 <- stop_words|>
+  filter(
+    !grepl("^she|^her|^hers|^he$|^he's|^him|^his|^they|^them|^their", word)
+  )
+```
+
+```{r}
+tidy_news <- deduped_df |>
+  unnest_tokens(word, full_text)
+
+```
+
+```{r}
+tidy_news <- tidy_news |>
+  anti_join(stop_words) |>
+  mutate(
+    stem = case_when(str_detect(word, "[^e|aies$]ies$") ~ str_replace(word, "ies$", "y"),
+                    str_detect(word, "[^e|a|oes$]es$") ~ str_replace(word, "es$", "e"),
+                    str_detect(word, "[^ss$|us$]s$") ~ str_remove(word, "s$"),
+                    TRUE ~ word)
+  )
+  
+```
+
+```{r}
+tidy_news |>
+  count(word, sort = TRUE)
+
+tidy_news |>
+  count(stem, sort = TRUE)
+```
