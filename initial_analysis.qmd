@@ -1,0 +1,139 @@
+---
+title: "Cleaning Data"
+format: html
+editor: source
+---
+# set up
+```{r}
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+
+library(tidytext)
+library(SnowballC)
+library(tm)
+library(topicmodels)
+
+```
+
+
+```{r}
+load("data/trans_news_clean.Rda")
+
+transness_clean <- deduped_df
+```
+
+# data
+
+```{r}
+data("stop_words")
+
+stop_words2 <- stop_words|>
+  filter(
+    !grepl("^she|^her|^hers|^he$|^he's|^him|^his|^they|^them|^their", word)
+  )
+```
+
+```{r}
+tidy_news <- transness_clean |>
+  unnest_tokens(word, full_text)
+
+```
+
+```{r}
+tidy_news <- tidy_news |>
+  anti_join(stop_words) |>
+  mutate(
+    stem = case_when(str_detect(word, "[^e|aies$]ies$") ~ str_replace(word, "ies$", "y"),
+                    str_detect(word, "[^e|a|oes$]es$") ~ str_replace(word, "es$", "e"),
+                    str_detect(word, "[^ss$|us$]s$") ~ str_remove(word, "s$"),
+                    TRUE ~ word)
+  )
+  
+```
+
+```{r}
+tidy_news |>
+  count(word, sort = TRUE)
+
+tidy_news |>
+  count(stem, sort = TRUE)
+```
+
+```{r}
+news_tf_idf <- tidy_news |>
+  count(word, title) |> 
+  bind_tf_idf(word, title, n)
+```
+
+# topic model
+```{r}
+news_dtm <- tidy_news |>
+  count(title, word) |>
+  cast_dtm(title, word, n)
+```
+
+```{r}
+story_lda <- LDA(news_dtm, k = 10, control = list(seed = 1234))
+```
+
+```{r}
+story_topics <- tidy(story_lda, matric = "beta")
+```
+
+```{r}
+top_terms <- story_topics |>
+  group_by(topic) |>
+  slice_max(beta, n = 8) |>
+  ungroup() |>
+  arrange(topic, -beta)
+```
+
+```{r}
+chart_top_terms <- top_terms |>
+  mutate(term = reorder_within(term, beta, topic)) |>
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered() +
+  labs(
+    x = "",
+    y = ""
+  )
+```
+
+```{r}
+ggsave("viz/unfitted_chart.png", chart_top_terms, width = 11, height = 7)
+```
+
+# quick number of artilces by publ
+```{r}
+library(gt)
+library(kableExtra)
+
+count_table <- transness_clean |>
+  group_by(publisher) |>
+  count() |>
+  mutate(
+    publisher = case_match(
+      publisher,
+      "CH" ~ "Chicago Tribune",
+      "LA" ~ "LA Times",
+      "NYT" ~ "New York Times",
+      "WP" ~ "Washington Post",
+      "WSJ" ~ "Wall Street Journal"
+    )
+  )
+
+table <- gt(count_table) |>
+  cols_label(
+    publisher = "Publisher",
+    n = "# of Articles"
+  )
+
+
+gtsave(table, "viz/count_table.png")
+```
+
+save
+

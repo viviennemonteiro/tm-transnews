@@ -111,7 +111,7 @@ clean_df <- doc_df |>
     -contains("_temp"),
     -copyright
   ) |>
-  distinct(across(-c(doc_id, doc_url)))
+  distinct(across(-c(doc_id, doc_url)), .keep_all = TRUE)
 ```
 
 ```{r}
@@ -146,10 +146,15 @@ deduped_df <- deduped_df |>
   anti_join(dupes, join_by(title))
 ```
 
+```{r}
+save(deduped_df, file="data/trans_news_clean.Rda")
+```
+
+
 ## rolling up remaining
 ```{r}
 # roll up differing source type
-metadata_rolled <- clean_df |>
+metadata_rolled <- deduped_df |>
   group_by(title, source_type) |>
   summarise(
     across(!full_text,                                  
@@ -158,15 +163,14 @@ metadata_rolled <- clean_df |>
 
 ```
 
-By title: 7397 - Gets rid of a bunch of briefings - also gets rid of schedules which solves a lot
-
-title ft: 1037 - all the basics leaves some of the slightly differet
-
-title source_type: 4215
-
 ```{r}
 metadata_rolled |>
-  get_dupes(title)
+  filter(
+    grepl("; ", document_type)
+  )
+
+metadata_rolled |>
+  get_dupes()
 ```
 
 # Initial Analysis
@@ -205,3 +209,9 @@ tidy_news |>
 tidy_news |>
   count(stem, sort = TRUE)
 ```
+```{r}
+news_tf_idf <- tidy_news |>
+  count(word, title) |> 
+  bind_tf_idf(word, title, n)
+```
+
