@@ -14,7 +14,7 @@ library(tm)
 library(tidytext)
 library(janitor)
 library(SnowballC)
-
+library(stringdist)
 
 ```
 
@@ -143,75 +143,42 @@ repeated_dupes <- deduped_df |>
   )
 
 deduped_df <- deduped_df |>
-  anti_join(dupes, join_by(title))
-```
-
-```{r}
-save(deduped_df, file="data/trans_news_clean.Rda")
+  anti_join(repeated_dupes, join_by(title))
 ```
 
 
-## rolling up remaining
 ```{r}
-# roll up differing source type
-metadata_rolled <- deduped_df |>
-  group_by(title, source_type) |>
-  summarise(
-    across(!full_text,                                  
-           ~paste0(unique(na.omit(.x)), collapse = "; "))
-  )
+web_df <- deduped_df |>
+  filter(source_type == "blogpodcastorwebsite") |>
+  arrange(num_na)|>
+  distinct(title, .keep_all = TRUE)
 
+paper_df <- deduped_df |>
+  filter(source_type == "newspaper") |>
+  arrange(num_na) |>
+  distinct(title, .keep_all = TRUE)
 ```
 
 ```{r}
-metadata_rolled |>
-  filter(
-    grepl("; ", document_type)
-  )
 
-metadata_rolled |>
-  get_dupes()
+deduped_df |>
+  #filter(publication_date < '2000-01-01') |>
+  mutate(publication_year = as.integer(publication_year)) |>
+ggplot(aes(x=publication_year, color=source_type)) +
+  geom_histogram(stat="count")s
+
 ```
 
-# Initial Analysis
 
 ```{r}
-data("stop_words")
-
-stop_words2 <- stop_words|>
-  filter(
-    !grepl("^she|^her|^hers|^he$|^he's|^him|^his|^they|^them|^their", word)
+final_df <- web_df |>
+  filter(publication_year > '1996') |>
+  bind_rows(
+    paper_df |>
+      filter(publication_year <= '1996')
   )
 ```
 
 ```{r}
-tidy_news <- deduped_df |>
-  unnest_tokens(word, full_text)
-
+save(final_df, file="data/trans_news_final.Rda")
 ```
-
-```{r}
-tidy_news <- tidy_news |>
-  anti_join(stop_words) |>
-  mutate(
-    stem = case_when(str_detect(word, "[^e|aies$]ies$") ~ str_replace(word, "ies$", "y"),
-                    str_detect(word, "[^e|a|oes$]es$") ~ str_replace(word, "es$", "e"),
-                    str_detect(word, "[^ss$|us$]s$") ~ str_remove(word, "s$"),
-                    TRUE ~ word)
-  )
-  
-```
-
-```{r}
-tidy_news |>
-  count(word, sort = TRUE)
-
-tidy_news |>
-  count(stem, sort = TRUE)
-```
-```{r}
-news_tf_idf <- tidy_news |>
-  count(word, title) |> 
-  bind_tf_idf(word, title, n)
-```
-

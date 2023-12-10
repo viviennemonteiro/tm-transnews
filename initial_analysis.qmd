@@ -1,5 +1,5 @@
 ---
-title: "Cleaning Data"
+title: "Inital Analysis"
 format: html
 editor: source
 ---
@@ -18,13 +18,12 @@ library(topicmodels)
 
 
 ```{r}
-load("data/trans_news_clean.Rda")
+load("data/trans_news_final.Rda")
 
-transness_clean <- deduped_df
+transness_clean <- final_df
 ```
 
 # data
-
 ```{r}
 data("stop_words")
 
@@ -66,7 +65,22 @@ news_tf_idf <- tidy_news |>
   bind_tf_idf(word, title, n)
 ```
 
-# topic model
+```{r}
+df <- tidy_news |>
+  group_by(title, doc_id) |>
+  summarise(
+    trans_mentions = sum(stem == "transgender")
+  ) |> 
+  left_join(select(deduped_df, doc_id, full_text), by='doc_id') |>
+  filter(
+    trans_mentions == 0 
+  )
+  
+  
+```
+
+
+# intial LDA topic model
 ```{r}
 news_dtm <- tidy_news |>
   count(title, word) |>
@@ -105,35 +119,3 @@ chart_top_terms <- top_terms |>
 ```{r}
 ggsave("viz/unfitted_chart.png", chart_top_terms, width = 11, height = 7)
 ```
-
-# quick number of artilces by publ
-```{r}
-library(gt)
-library(kableExtra)
-
-count_table <- transness_clean |>
-  group_by(publisher) |>
-  count() |>
-  mutate(
-    publisher = case_match(
-      publisher,
-      "CH" ~ "Chicago Tribune",
-      "LA" ~ "LA Times",
-      "NYT" ~ "New York Times",
-      "WP" ~ "Washington Post",
-      "WSJ" ~ "Wall Street Journal"
-    )
-  )
-
-table <- gt(count_table) |>
-  cols_label(
-    publisher = "Publisher",
-    n = "# of Articles"
-  )
-
-
-gtsave(table, "viz/count_table.png")
-```
-
-save
-
