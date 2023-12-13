@@ -14,7 +14,6 @@ library(tm)
 library(tidytext)
 library(janitor)
 library(SnowballC)
-library(stringdist)
 
 ```
 
@@ -49,7 +48,7 @@ doctype_normalize <- function(x) {
 fulltext_preprocess <- function (x) {
   str_to_lower(x) |>
   str_replace_all('http\\S+\\s*', "") |>
-  removePunctuation() |>
+  str_remove('[:punct:]') |>
   removeNumbers() |>
   str_replace_all(' +', ' ') |>
   str_trim(side="both")
@@ -93,7 +92,7 @@ clean_df <- doc_df |>
     posted_temp = as.Date(str_remove_all(str_replace_all(str_extract(title, "(posted .*)"), "posted |\\d\\d:\\d\\d:\\d\\d\\).*", ""), " ")),
     cr_temp = as.Date(str_extract(copyright, "[:alpha:]{3} \\d{1,2}, \\d{4}$"), format="%b %d, %Y"),
     posted_temp = coalesce(posted_temp, cr_temp),
-    publication_date = coalesce(publication_date, posted_temp), 
+    publication_date = coalesce(publication_date, posted_temp),
   ) |>
   filter(
     !publisher %in% c("activision", "brasseysincofdullesva", "newstex", NA), #filter out incorrect publishers

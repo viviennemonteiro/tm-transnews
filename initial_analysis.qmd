@@ -24,10 +24,15 @@ load("data/trans_news_final.Rda")
 ```{r}
 final_df <- final_df |>
   mutate(
-    day = as.numeric(publication_date - as.Date('1980-06-12'))
+    day = as.numeric(publication_date - as.Date('1980-06-12')),
+    trans_mentions = str_count(full_text, "trans|transgender[.*][ \\.$?!]|transexual|tranny|transvestite")
   ) |>
   filter(!is.na(publication_date),
          section!="espanol")
+```
+
+```{r}
+summary(final_df$trans_mentions)
 ```
 
 
@@ -58,11 +63,6 @@ tidy_news <- final_df |>
 ```
 
 ```{r}
-  
-  
-```
-
-```{r}
 tidy_counts <- tidy_news |>
   count(id, word, sort = TRUE) |>
   mutate(
@@ -76,10 +76,6 @@ tidy_counts <- tidy_news |>
   anti_join(sw, by = join_by(stem==word))
 ```
 
-```{r}
-tidy_counts |>
-  filter(str_detect(word, "dont"))
-```
 
 ## stm formatting
 ```{r}
@@ -89,7 +85,8 @@ trans_meta <- final_df |>
   select(
     doc_id,
     publisher,
-    day
+    day,
+    trans_mentions
   )
 
 trans_stm <- tidy_counts |>
@@ -146,9 +143,83 @@ storek <- searchK(
 )
 ```
 
+# evaluate
 
+```{r}
+dialk <- searchK(
+  documents = out$documents,
+  vocab = out$vocab,
+  K = seq(20, 40, by=5),
+  prevalence = ~s(day),
+  max.em.its = 50,
+  data = out$meta,
+  init.type = "Spectral",
+  verbose = TRUE,
+)
+```
 
 ```{r}
 plot(storek)
+```
+
+
+```{r}
+plot(dialk)
+```
+
+```{r}
+tibble(storek$results) |>
+  bind_rows(dialk$results) |>
+  mutate_all(
+    as.numeric
+  ) |>
+ggplot(aes(x=semcoh, y=exclus, label=K)) +
+  geom_label()
+```
+
+```{r}
+dialk
+```
+
+
+```{r}
+model_k30_nometa <- stm(
+  documents = out$documents,
+  vocab = out$vocab,
+  K = 30,
+  #prevalence = ~s(day),
+  max.em.its = 100,
+  data = out$meta,
+  init.type = "Spectral",
+  verbose = TRUE
+)
+```
+
+
+```{r}
+model_k30 <- stm(
+  documents = out$documents,
+  vocab = out$vocab,
+  K = 30,
+  prevalence = ~s(day),
+  max.em.its = 100,
+  data = out$meta,
+  init.type = "Spectral",
+  verbose = TRUE
+)
+```
+
+
+```{r}
+plot(model_k30, type = "summary", xlim = c(0, 0.10))
+```
+```{r}
+labelTopics(model_k30)
+```
+
+```{r}
+estimateEffect(1:30 ~ s(day), model_k30, meta = out$meta, uncertainty = "Global") |>
+  summary(topics = 1)
+
 ```
 
