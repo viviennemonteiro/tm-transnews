@@ -11,9 +11,7 @@ editor: source
 
 library(tidyverse)
 library(tm)
-library(tidytext)
 library(janitor)
-library(SnowballC)
 
 ```
 
@@ -49,6 +47,7 @@ fulltext_preprocess <- function (x) {
   str_to_lower(x) |>
   str_replace_all('http\\S+\\s*', "") |>
   str_remove('[:punct:]') |>
+  removePunctuation() |>
   removeNumbers() |>
   str_replace_all(' +', ' ') |>
   str_trim(side="both")
@@ -71,6 +70,7 @@ clean_df <- doc_df |>
     doc_url = document_url
   ) |>
   mutate(
+    unproc_full = full_text,
     first_sentence = fulltext_preprocess(str_extract(full_text, ".{100}")),
     # text preprocessing
     title = title_process(title),
@@ -124,7 +124,8 @@ clean_df <- clean_df |>
                 str_remove_all("washington post") |>
                 str_remove_all("chicago tribune|tribune") |>
                 str_remove_all("wall street journal") |>
-                str_remove_all("times")
+                str_remove_all("times|tribune|post|journal") |>
+                str_remove_all("new york|los angeles|chicago")
   )
 ```
 
@@ -184,10 +185,10 @@ ggplot(aes(x=publication_year, color=source_type)) +
 ```{r}
 #bind web and paper
 final_df <- web_df |>
-  filter(publication_year > '1996') |>
+  filter(publication_date >= as.Date('1997-01-01')) |>
   bind_rows(
     paper_df |>
-      filter(publication_year <= '1996')
+      filter(publication_date <= as.Date('1996-12-31'))
   ) |>
   rowid_to_column("id") #create id
 ```

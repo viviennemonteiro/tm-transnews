@@ -13,6 +13,7 @@ library(tidytext)
 library(SnowballC)
 library(tm)
 library(stm)
+library(quanteda)
 
 ```
 
@@ -21,18 +22,17 @@ library(stm)
 load("data/trans_news_final.Rda")
 ```
 
+
 ```{r}
 final_df <- final_df |>
   mutate(
+    year = year(publication_date),
     day = as.numeric(publication_date - as.Date('1980-06-12')),
+    weeks = as.numeric(difftime(publication_date, as.Date('1980-06-12'), units = "weeks")),
     trans_mentions = str_count(full_text, "trans|transgender[.*][ \\.$?!]|transexual|tranny|transvestite")
   ) |>
   filter(!is.na(publication_date),
          section!="espanol")
-```
-
-```{r}
-summary(final_df$trans_mentions)
 ```
 
 
@@ -46,7 +46,7 @@ sw <- tidytext::stop_words |>
   ) |>
   mutate(
     word =  str_to_lower(word) |>
-            removePunctuation() |>
+            str_remove_all("[[:punct:]]") |>
             removeNumbers() |>
             str_remove_all("[:space:]") |>
             str_trim(side="both")
@@ -58,7 +58,6 @@ sw <- tidytext::stop_words |>
 ```{r}
 tidy_news <- final_df |>
   unnest_tokens(word, full_text)
-  
 
 ```
 
@@ -73,21 +72,27 @@ tidy_counts <- tidy_news |>
         TRUE ~ word)
   ) |>
   anti_join(sw) |>
-  anti_join(sw, by = join_by(stem==word))
+  anti_join(sw, by = join_by(stem==word)) |>
+  arrange(id)
 ```
+
 
 
 ## stm formatting
 ```{r}
-library(quanteda)
 
 trans_meta <- final_df |>
   select(
-    doc_id,
+    id,
     publisher,
+    year,
+    weeks,
     day,
-    trans_mentions
-  )
+    trans_mentions,
+    title,
+    unproc_full
+  ) |>
+  arrange(id)
 
 trans_stm <- tidy_counts |>
   cast_dfm(id, stem, n) |>
@@ -107,28 +112,7 @@ plotRemoved(trans_stm$documents, lower.thresh = seq(1, 20, by = 1))
 out <- prepDocuments(trans_stm$documents, trans_stm$vocab, trans_stm$meta, lower.thresh = 5)
 ```
 
-```{r}
-first_mod <- stm(
-  documents = out$documents,
-  vocab = out$vocab,
-  K = 40,
-  prevalence = ~s(day),
-  max.em.its = 75,
-  data = out$meta,
-  init.type = "Spectral",
-  verbose = TRUE
-)
-```
-
-```{r}
-plot(first_mod)
-```
-
-
-```{r}
-findThoughts(first_mod, final_df$full_text, n = 4, topics = 3)
-```
-
+# evaluate
 
 ```{r}
 storek <- searchK(
@@ -142,8 +126,6 @@ storek <- searchK(
   verbose = TRUE,
 )
 ```
-
-# evaluate
 
 ```{r}
 dialk <- searchK(
@@ -162,7 +144,6 @@ dialk <- searchK(
 plot(storek)
 ```
 
-
 ```{r}
 plot(dialk)
 ```
@@ -177,11 +158,7 @@ ggplot(aes(x=semcoh, y=exclus, label=K)) +
   geom_label()
 ```
 
-```{r}
-dialk
-```
-
-
+# final model
 ```{r}
 model_k30_nometa <- stm(
   documents = out$documents,
@@ -195,14 +172,13 @@ model_k30_nometa <- stm(
 )
 ```
 
-
 ```{r}
 model_k30 <- stm(
   documents = out$documents,
   vocab = out$vocab,
   K = 30,
   prevalence = ~s(day),
-  max.em.its = 100,
+  max.em.its = 200,
   data = out$meta,
   init.type = "Spectral",
   verbose = TRUE
@@ -210,16 +186,197 @@ model_k30 <- stm(
 ```
 
 
+# analysis
+
 ```{r}
 plot(model_k30, type = "summary", xlim = c(0, 0.10))
 ```
+
+## 
 ```{r}
 labelTopics(model_k30)
 ```
 
 ```{r}
-estimateEffect(1:30 ~ s(day), model_k30, meta = out$meta, uncertainty = "Global") |>
-  summary(topics = 1)
+findThoughts(model_k30, texts = trans_meta$title, n = 45, topics = 17)
+```
 
+```{r}
+topicCorr(model_k30, method = "simple", cutoff = 0.01, verbose = TRUE) |>
+plot.topicCorr(vertex.color = "grey", vertex.label.cex = 1)
+
+```
+
+```{r}
+topicQuality(model_k30, out$documents)
+```
+
+# Tidying Results
+```{r}
+labels <- read_csv("topic_labels.csv")
+```
+
+```{r}
+#| label: general linear trend of each topic over time
+genlintrend <- estimateEffect(1:30 ~ day, model_k30, meta = out$meta, uncertainty = "Global")
+```
+
+```{r}
+byday <- estimateEffect(1:30 ~ s(day, 86), model_k30, meta = out$meta, uncertainty = "Global")
+```
+
+```{r}
+bypaper <- estimateEffect(1:30 ~ publisher, model_k30, meta = out$meta, uncertainty = "Global")
+```
+
+```{r}
+topic_beta <- tidy(model_k30, matrix = "beta") |>
+  left_join(
+  labels |>
+    select(
+      topic_number,
+      topic_label,
+      category),
+    by=join_by(topic==topic_number))
+
+tidy_gamma <- tidy(model_k30, matrix = "gamma")
+
+tidy_theta <- tidy(model_k30, matrix = "theta") |>
+  left_join(
+  labels |>
+    select(
+      topic_number,
+      topic_label,
+      category),
+    by=join_by(topic==topic_number))
+
+```
+
+```{r}
+#| label: create ot df
+library(tidystm)
+
+top_ot <- extract.estimateEffect(x = byday,
+                                   covariate="day",
+                                   method="continuous",
+                                   model = model_k30,
+                                   n=100)
+  
+
+```
+
+```{r}
+#| label: creat pub df
+
+tidy_pub <- extract.estimateEffect(x = bypaper,
+                                   covariate="publisher",
+                                   method="pointestimate",
+                                   model = model_k30,
+                                   n=100)
+```
+
+# plotting
+```{r}
+#| label: top words
+
+topic_beta |>
+  group_by(topic) |>
+  slice_max(beta, n = 10) |>
+  ungroup() |>
+  arrange(topic, -beta) |>
+  mutate(term = reorder_within(term, beta, topic)) |>
+  filter(category=="Trans Issue") |>
+ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic_label, scales = "free") +
+  scale_y_reordered()
+```
+
+```{r}
+proportions_table <- as.data.frame(make.dt(model_k30))
+```
+
+```{r}
+proportions_table |>
+  bind_cols(
+    date = final_df$publication_date
+  ) |>
+  group_by(year = year(date)) |>
+  select(
+    !c(date, docnum)) |>
+  summarise_all(mean) |>
+  pivot_longer(
+    !year,
+    names_to = "topic",
+    values_to = "mean"
+  ) |>
+  filter(topic=="Topic29") |>
+  ggplot( aes(year, mean)) +
+  geom_line()
+```
+
+
+```{r}
+#| label: test plot from the package
+plot(byday, "day", method = "continuous", topics = 9, printlegend = FALSE, xaxt = "n", xlab = "Time")
+monthseq <- seq(from = min(out$meta$day), to = max(out$meta$day), by = 366)
+label <- monthseq/366+1980
+axis(1,at = as.numeric(monthseq) - min(as.numeric(monthseq)), labels = label)
+```
+
+
+# Plots
+
+```{r}
+#| label: point range by paper
+tidy_pub |>
+  filter(topic==26) |>
+ggplot(aes(x=estimate, y=covariate.value)) +
+  geom_pointrange(aes(xmin = ci.lower, xmax = ci.upper))
+```
+
+## overtime plots
+```{r}
+top_ot <- top_ot |>
+  left_join(
+    labels |>
+      select(
+        topic_number,
+        topic_label,
+        category
+      ),
+    by=join_by(topic==topic_number))
+```
+
+```{r}
+top_ot |>
+  filter(category=="Trans Issue") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label))
+```
+
+```{r}
+top_ot |>
+  filter(category=="Policymaking") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label))
+```
+
+```{r}
+top_ot |>
+  filter(category=="Arts") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label))
+```
+
+```{r}
+top_ot |>
+  filter(category=="Politics") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label))
 ```
 
