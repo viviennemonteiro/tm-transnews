@@ -1,0 +1,118 @@
+---
+title: "adding wsj"
+format: html
+editor: source
+---
+# set up
+```{r}
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+
+library(tidytext)
+library(SnowballC)
+library(tm)
+library(stm)
+library(quanteda)
+
+```
+
+```{r}
+load("data/trans_news_final_added_wsj.Rda")
+```
+
+
+```{r}
+final_df <- final_df |>
+  mutate(
+    year = year(publication_date),
+    day = as.numeric(publication_date - as.Date('1980-06-12')),
+    weeks = as.numeric(difftime(publication_date, as.Date('1980-06-12'), units = "weeks")),
+    trans_mentions = str_count(full_text, "trans|transgender[.*][ \\.$?!]|transexual|tranny|transvestite")
+  ) |>
+  filter(!is.na(publication_date),
+         section!="espanol")
+```
+
+
+# Ingest and Prepare
+```{r}
+sw <- tidytext::stop_words |>
+  bind_rows(
+    as.data.frame(
+      list(word = c("pm", "am", "ms", "la", "de", "el"))
+    )
+  ) |>
+  mutate(
+    word =  str_to_lower(word) |>
+            str_remove_all("[[:punct:]]") |>
+            removeNumbers() |>
+            str_remove_all("[:space:]") |>
+            str_trim(side="both")
+  ) |>
+  distinct(word, .keep_all = TRUE)
+```
+
+```{r}
+tidy_news <- final_df |>
+  unnest_tokens(word, full_text)
+
+```
+
+```{r}
+tidy_counts <- tidy_news |>
+  count(id, word, sort = TRUE) |>
+  mutate(
+    word = str_remove_all(word, "[[:punct:]]"),
+    stem = case_when(str_detect(word, "[^e|aies$]ies$") ~ str_replace(word, "ies$", "y"),
+        str_detect(word, "[^e|a|oes$]es$") ~ str_replace(word, "es$", "e"),
+        str_detect(word, "[^ss$|us$]s$") ~ str_remove(word, "s$"),
+        TRUE ~ word)
+  ) |>
+  anti_join(sw) |>
+  anti_join(sw, by = join_by(stem==word)) |>
+  arrange(id)
+```
+
+## stm formatting
+```{r}
+
+trans_meta <- final_df |>
+  select(
+    id,
+    publisher,
+    year,
+    weeks,
+    day,
+    trans_mentions,
+    title,
+    unproc_full
+  ) |>
+  arrange(id)
+
+trans_stm <- tidy_counts |>
+  cast_dfm(id, stem, n) |>
+  convert(
+    to = "stm",
+    docvars = trans_meta
+  )
+
+```
+
+```{r}
+out <- prepDocuments(trans_stm$documents, trans_stm$vocab, trans_stm$meta, lower.thresh = 5)
+```
+
+# final model
+```{r}
+final_model <- stm(
+  documents = out$documents,
+  vocab = out$vocab,
+  K = 30,
+  prevalence = ~s(day),
+  max.em.its = 200,
+  data = out$meta,
+  init.type = "Spectral",
+  verbose = TRUE
+)
+```

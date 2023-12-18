@@ -17,7 +17,6 @@ library(quanteda)
 
 ```
 
-
 ```{r}
 load("data/trans_news_final.Rda")
 ```
@@ -75,7 +74,6 @@ tidy_counts <- tidy_news |>
   anti_join(sw, by = join_by(stem==word)) |>
   arrange(id)
 ```
-
 
 
 ## stm formatting
@@ -159,18 +157,6 @@ ggplot(aes(x=semcoh, y=exclus, label=K)) +
 ```
 
 # final model
-```{r}
-model_k30_nometa <- stm(
-  documents = out$documents,
-  vocab = out$vocab,
-  K = 30,
-  #prevalence = ~s(day),
-  max.em.its = 100,
-  data = out$meta,
-  init.type = "Spectral",
-  verbose = TRUE
-)
-```
 
 ```{r}
 model_k30 <- stm(
@@ -184,7 +170,6 @@ model_k30 <- stm(
   verbose = TRUE
 )
 ```
-
 
 # analysis
 
@@ -330,7 +315,7 @@ axis(1,at = as.numeric(monthseq) - min(as.numeric(monthseq)), labels = label)
 ```{r}
 #| label: point range by paper
 tidy_pub |>
-  filter(topic==26) |>
+  filter(topic==16) |>
 ggplot(aes(x=estimate, y=covariate.value)) +
   geom_pointrange(aes(xmin = ci.lower, xmax = ci.upper))
 ```
@@ -349,11 +334,23 @@ top_ot <- top_ot |>
 ```
 
 ```{r}
+#| label: x axis label
+year_scale <- scale_x_continuous(
+  breaks = seq(min(top_ot$covariate.value), max(top_ot$covariate.value), length.out = 5), 
+  labels = function(x) {
+    format(1980 + floor((x)/365.25)
+      )}
+  )
+```
+
+
+```{r}
 top_ot |>
   filter(category=="Trans Issue") |>
   ggplot(aes(x=covariate.value, y=estimate)) +
   geom_line() +
-  facet_wrap(vars(topic_label))
+  facet_wrap(vars(topic_label)) +
+  year_scale
 ```
 
 ```{r}
@@ -361,7 +358,8 @@ top_ot |>
   filter(category=="Policymaking") |>
   ggplot(aes(x=covariate.value, y=estimate)) +
   geom_line() +
-  facet_wrap(vars(topic_label))
+  facet_wrap(vars(topic_label)) +
+  year_scale
 ```
 
 ```{r}
@@ -369,7 +367,8 @@ top_ot |>
   filter(category=="Arts") |>
   ggplot(aes(x=covariate.value, y=estimate)) +
   geom_line() +
-  facet_wrap(vars(topic_label))
+  facet_wrap(vars(topic_label)) +
+  year_scale
 ```
 
 ```{r}
@@ -377,6 +376,7 @@ top_ot |>
   filter(category=="Politics") |>
   ggplot(aes(x=covariate.value, y=estimate)) +
   geom_line() +
-  facet_wrap(vars(topic_label))
+  facet_wrap(vars(topic_label)) +
+  year_scale
 ```
 

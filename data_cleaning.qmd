@@ -184,15 +184,23 @@ ggplot(aes(x=publication_year, color=source_type)) +
 
 ```{r}
 #bind web and paper
+wsj_docs <- deduped_df |>
+  filter(publisher=="WSJ",
+         publication_date >= as.Date('1997-01-01'))
+
 final_df <- web_df |>
   filter(publication_date >= as.Date('1997-01-01')) |>
   bind_rows(
     paper_df |>
       filter(publication_date <= as.Date('1996-12-31'))
   ) |>
+  bind_rows(
+    wsj_docs
+  ) |>
   rowid_to_column("id") #create id
 ```
 
 ```{r}
-save(final_df, file="data/trans_news_final.Rda")
+save(final_df, file="data/trans_news_final_added_wsj.Rda")
 ```
+

@@ -1,0 +1,334 @@
+---
+title: "Inital Analysis"
+format: html
+editor: source
+---
+# set up
+```{r}
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+
+library(tidytext)
+library(SnowballC)
+library(tm)
+library(stm)
+library(quanteda)
+
+```
+
+```{r}
+#| label: load model
+```
+
+
+# analysis
+
+```{r}
+plot(model_k30, type = "summary", xlim = c(0, 0.10))
+```
+
+## 
+```{r}
+labelTopics(model_k30)
+```
+
+```{r}
+findThoughts(model_k30, texts = trans_meta$title, n = 45, topics = 9)
+```
+
+```{r}
+topicCorr(model_k30, method = "simple", cutoff = 0.01, verbose = TRUE) |>
+plot.topicCorr(vertex.color = "grey", vertex.label.cex = 1)
+
+```
+
+```{r}
+topicQuality(model_k30, out$documents)
+```
+
+# Tidying Results
+```{r}
+labels <- read_csv("topic_labels.csv")
+```
+
+```{r}
+#| label: general linear trend of each topic over time
+estimateEffect(1:30 ~ year, model_k30, meta = out$meta, uncertainty = "Global")
+```
+
+```{r}
+byday <- estimateEffect(1:30 ~ s(day, 43), model_k30, meta = out$meta, uncertainty = "Global")
+```
+
+```{r}
+bypaper <- estimateEffect(1:30 ~ publisher, model_k30, meta = out$meta, uncertainty = "Global")
+```
+
+```{r}
+proportions_table <- as.data.frame(make.dt(model_k30))
+```
+
+```{r}
+topic_beta <- tidy(model_k30, matrix = "beta") |>
+  left_join(
+  labels |>
+    select(
+      topic_number,
+      topic_label,
+      category),
+    by=join_by(topic==topic_number))
+
+tidy_gamma <- tidy(model_k30, matrix = "gamma")
+
+tidy_theta <- tidy(model_k30, matrix = "theta") |>
+  left_join(
+  labels |>
+    select(
+      topic_number,
+      topic_label,
+      category),
+    by=join_by(topic==topic_number))
+
+```
+
+```{r}
+#| label: create ot df
+library(tidystm)
+
+top_ot <- extract.estimateEffect(x = byday,
+                                   covariate="day",
+                                   method="continuous",
+                                   model = model_k30,
+                                   n=100)
+  
+
+```
+
+```{r}
+#| label: creat pub df
+
+tidy_pub <- extract.estimateEffect(x = bypaper,
+                                   covariate="publisher",
+                                   method="pointestimate",
+                                   model = model_k30,
+                                   n=100)
+```
+
+# plotting
+```{r}
+#| label: top words
+
+topic_beta |>
+  group_by(topic) |>
+  slice_max(beta, n = 10) |>
+  ungroup() |>
+  arrange(topic, -beta) |>
+  mutate(term = reorder_within(term, beta, topic)) |>
+  filter(category=="Trans Issue") |>
+ggplot(aes(beta, term)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic_label, scales = "free") +
+  scale_y_reordered()
+```
+
+```{r}
+topic_prevelence <- tidy_theta |>
+  group_by(topic,
+            topic_label,
+           category
+  ) |>
+  summarise(
+    gamma = mean(gamma)
+  ) |>
+ggplot(aes(y=reorder(topic_label, gamma), x=gamma)) +
+  geom_bar(stat = "identity", width=.25) +
+  geom_text(aes(label=topic_label), hjust=-.2) +
+  scale_x_continuous(limits = c(0,0.06)) +
+  scale_y_discrete(label=NULL) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.background = element_rect(color="white"),
+    plot.background = element_rect(color="white"),
+    plot.title = element_text(size=12),
+    axis.title = element_text(size=10),
+    axis.ticks.y = element_blank()
+  ) +
+  labs(
+    x = "Expected Topic Proportions",
+    y = "Topic",
+    title = "Top Topics"
+  )
+ggsave("viz/topic_prevelence.png", topic_prevelence, width = 7, height = 6)
+```
+
+
+# Plots
+
+```{r}
+#| label: point range by paper
+tidy_pub |>
+  filter(topic==16) |>
+ggplot(aes(x=estimate, y=covariate.value)) +
+  geom_pointrange(aes(xmin = ci.lower, xmax = ci.upper))
+```
+
+## overtime plots
+```{r}
+top_ot <- top_ot |>
+  left_join(
+    labels |>
+      select(
+        topic_number,
+        topic_label,
+        category
+      ),
+    by=join_by(topic==topic_number))
+```
+
+```{r}
+#| label: x axis label
+year_scale <- scale_x_continuous(
+  breaks = seq(min(top_ot$covariate.value), max(top_ot$covariate.value), length.out = 5), 
+  labels = function(x) {
+    format(1980 + floor((x)/365.25)
+      )}
+  )
+ot_labs <- labs(
+    x = "Year",
+    y = "Expected Topic Proportion"
+  )
+
+ot_theme <- theme(panel.spacing.x = unit(1, "lines"),
+                  plot.title = element_text(size=10),
+                  axis.title = element_text(size=8))
+```
+
+
+```{r}
+transissues_plot <- top_ot |>
+  filter(category=="Trans Issue") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label)) +
+  year_scale +
+  ot_theme +
+  labs(
+    x = "Year",
+    y = "Expected Topic Proportion",
+    title = paste0("Trans Issues ", "Over Time")
+  )
+```
+
+```{r}
+policymaker_plot <- top_ot |>
+  filter(category=="Policymaking") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label)) +
+  year_scale +
+  ot_theme +
+  labs(
+    x = "Year",
+    y = "Expected Topic Proportion",
+    title = paste0("Policymaking ", "Over Time")
+  )
+
+```
+
+```{r}
+arts_plot <- top_ot |>
+  filter(category=="Arts") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label)) +
+  year_scale +
+  ot_theme +
+  labs(
+    x = "Year",
+    y = "Expected Topic Proportion",
+    title = paste0("Arts and Culture ", "Over Time")
+  )
+```
+
+```{r}
+politics_plot <- top_ot |>
+  filter(category=="Politics") |>
+  ggplot(aes(x=covariate.value, y=estimate)) +
+  geom_line() +
+  facet_wrap(vars(topic_label)) +
+  year_scale +
+  ot_theme +
+  labs(
+    x = "Year",
+    y = "Expected Topic Proportion",
+    title = paste0("Politics ", "Over Time")
+  )
+```
+
+```{r}
+ggsave("viz/policymaking_plot.png", policymaker_plot, width = 4, height = 2)
+ggsave("viz/transissues_plot.png", transissues_plot, width = 6, height = 3)
+ggsave("viz/politics_plot.png", politics_plot, width = 6, height = 3)
+ggsave("viz/arts_plot.png", arts_plot, width = 6, height = 4)
+```
+
+
+```{r}
+labels |>
+  select(
+    topic_number,
+    topic_label,
+    category,
+    highest_prob
+    ) |>
+  gt::gt()
+```
+
+```{r}
+tidy_theta |>
+left_join(trans_meta, by = join_by(document==id)) |>
+  filter(str_detect(title, "trump says transgender people will not be allowed in the military"))
+```
+
+```{r}
+library(gt)
+library(kableExtra)
+topic_table <- labels |>
+  select(
+    topic_number,
+    topic_label,
+    category,
+    highest_prob
+  ) |>
+gt() |> 
+  tab_header(
+    title = "Model Results: Topic Labels and Associated Words",
+    #subtitle = "Seven Representative U.S. States"
+  ) |> 
+  cols_label(
+    topic_number = "Topic Number",
+    topic_label = "Label",
+    category = "Category",
+    highest_prob = "Highest Probability Words",
+  ) |>
+  tab_style(
+    style = cell_text(weight = "bold"), locations = cells_column_labels(columns=c(topic_number:highest_prob))
+  ) |>
+  cols_align(
+    align = "center",
+    columns = topic_number:category
+  ) |>
+  tab_options(
+    table.border.top.color = "black", 
+    table.border.bottom.color = "black",
+    heading.border.bottom.color = "black", 
+    column_labels.border.bottom.color = "black", 
+    table_body.border.bottom.color = "black"
+  ) |>
+  cols_width(highest_prob ~ px(475)) |>
+  cols_width(topic_number ~ px(100))
+
+gtsave(topic_table, "viz/table_topic.png")
+```
+
